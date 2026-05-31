@@ -16,14 +16,28 @@ export function createApp() {
   // Keamanan dasar header HTTP.
   app.use(helmet());
 
-  // CORS: hanya izinkan origin frontend yang dikonfigurasi.
+ // CORS: izinkan request same-origin (deploy fullstack: frontend & backend di
+  // domain yang sama) + origin yang terdaftar via CORS_ALLOW_ORIGINS.
+  // Memakai bentuk "delegate" cors agar bisa membaca req.headers.host.
   app.use(
-    cors({
-      origin(origin, cb) {
-        // Izinkan tools tanpa origin (curl/Postman) dan origin yang terdaftar.
-        if (!origin || config.corsOrigins.includes(origin)) return cb(null, true);
-        return cb(new Error(`Origin tidak diizinkan oleh CORS: ${origin}`));
-      },
+    cors((req, cb) => {
+      const origin = req.headers.origin;
+      // Tools tanpa origin (curl/Postman/health check) selalu diizinkan.
+      if (!origin) return cb(null, { origin: true });
+      // Origin yang terdaftar eksplisit.
+      if (config.corsOrigins.includes(origin)) return cb(null, { origin: true });
+      // Same-origin: host pada header Origin sama dengan host request.
+      // Saat fullstack di Vercel, frontend memanggil /api di domain yang sama,
+      // jadi ini menutup kasus tanpa perlu mengeset CORS_ALLOW_ORIGINS.
+      try {
+        if (new URL(origin).host === req.headers.host) {
+          return cb(null, { origin: true });
+        }
+      } catch {
+        /* origin bukan URL valid — lanjut tolak */
+      }
+      logger.warn(`Origin ditolak oleh CORS: ${origin}`);
+      return cb(null, { origin: false });
     })
   );
 
